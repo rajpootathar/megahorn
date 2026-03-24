@@ -1,0 +1,4 @@
+compose_button: '[data-testid="SideNav_NewTweet_Button"]'
+tweet_textarea: '[data-testid="tweetTextarea_0"]'
+post_button: '[data-testid="tweetButtonInline"]'
+tweet_link: 'a[href*="/status/"]'
