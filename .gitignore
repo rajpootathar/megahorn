@@ -1,0 +1,6 @@
+megahorn
+dist/
+.megahorn/
+*.enc
+.env
+.DS_Store
