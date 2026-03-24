@@ -1,0 +1,14 @@
+{
+  "name": "megahorn",
+  "version": "0.1.0",
+  "description": "Cross-post to social media from terminal or AI agents via MCP",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rajpootathar/megahorn"
+  },
+  "keywords": ["claude-code", "skills", "social-media", "mcp", "crosspost"],
+  "license": "MIT",
+  "skills": {
+    "social-post": "skills/social-post/SKILL.md"
+  }
+}
