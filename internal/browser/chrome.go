@@ -10,11 +10,12 @@ import (
 )
 
 type ChromeOpts struct {
-	Headed     bool
-	ChromePath string
+	Headed      bool
+	ChromePath  string
+	UserDataDir string // persistent Chrome profile path
 }
 
-func NewContext(ctx context.Context, opts ChromeOpts) (context.Context, context.CancelFunc) {
+func NewContext(ctx context.Context, opts ChromeOpts) (context.Context, context.CancelFunc, error) {
 	allocOpts := chromedp.DefaultExecAllocatorOptions[:]
 
 	if opts.Headed {
@@ -27,9 +28,18 @@ func NewContext(ctx context.Context, opts ChromeOpts) (context.Context, context.
 		allocOpts = append(allocOpts, chromedp.ExecPath(opts.ChromePath))
 	}
 
+	if opts.UserDataDir != "" {
+		if err := os.MkdirAll(opts.UserDataDir, 0700); err != nil {
+			return nil, nil, fmt.Errorf("failed to create chrome profile dir: %w", err)
+		}
+		allocOpts = append(allocOpts, chromedp.UserDataDir(opts.UserDataDir))
+	}
+
 	allocOpts = append(allocOpts,
 		chromedp.WindowSize(1280, 800),
 		chromedp.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
+		chromedp.Flag("enable-automation", false),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 	)
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(ctx, allocOpts...)
@@ -38,7 +48,7 @@ func NewContext(ctx context.Context, opts ChromeOpts) (context.Context, context.
 	return taskCtx, func() {
 		taskCancel()
 		allocCancel()
-	}
+	}, nil
 }
 
 // CaptureScreenshot saves a screenshot to /tmp/megahorn/ and returns the path.

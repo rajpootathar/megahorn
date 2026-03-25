@@ -2,12 +2,11 @@ package platform
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
-	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	authpkg "github.com/rajpootathar/megahorn/internal/auth"
 	"github.com/rajpootathar/megahorn/internal/browser"
@@ -35,8 +34,8 @@ func (tw *Twitter) Status() AuthStatus {
 	if tw.keyring == nil {
 		return AuthStatusNotConfigured
 	}
-	_, err := tw.keyring.Get("twitter", "cookies")
-	if err != nil {
+	val, err := tw.keyring.Get("twitter", "auth")
+	if err != nil || val != "true" {
 		return AuthStatusNotConfigured
 	}
 	return AuthStatusAuthenticated
@@ -51,22 +50,30 @@ func (tw *Twitter) chromeOpts(headedOverride *bool) browser.ChromeOpts {
 	if headedOverride != nil {
 		headed = *headedOverride
 	}
+	profileDir := cfg.Browser.ProfileDir
+	if profileDir == "" {
+		profileDir = config.DefaultProfileDir()
+	}
 	return browser.ChromeOpts{
-		Headed:     headed,
-		ChromePath: cfg.Browser.ChromePath,
+		Headed:      headed,
+		ChromePath:  cfg.Browser.ChromePath,
+		UserDataDir: profileDir,
 	}
 }
 
 func (tw *Twitter) Auth(opts AuthOpts) error {
 	headed := opts.Headed
-	ctx, cancel := browser.NewContext(context.Background(), tw.chromeOpts(&headed))
+	ctx, cancel, err := browser.NewContext(context.Background(), tw.chromeOpts(&headed))
+	if err != nil {
+		return fmt.Errorf("failed to create browser context: %w", err)
+	}
 	defer cancel()
 
 	fmt.Println("Opening Twitter login page...")
 	fmt.Println("Please log in manually (handle 2FA if needed).")
 	fmt.Println("Press Enter here once you're logged in and see your feed...")
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.Navigate("https://x.com/login"),
 	)
 	if err != nil {
@@ -75,62 +82,14 @@ func (tw *Twitter) Auth(opts AuthOpts) error {
 
 	fmt.Scanln()
 
-	// Capture cookies as JSON
-	var cookies []*network.Cookie
-	err = chromedp.Run(ctx,
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var err error
-			cookies, err = network.GetCookies().Do(ctx)
-			return err
-		}),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to capture cookies: %w", err)
-	}
-
-	cookieJSON, err := json.Marshal(cookies)
-	if err != nil {
-		return fmt.Errorf("failed to serialize cookies: %w", err)
-	}
-
+	// Clean up old cookie-based auth from keyring (migration)
 	if tw.keyring != nil {
-		tw.keyring.Set("twitter", "cookies", string(cookieJSON))
+		tw.keyring.Delete("twitter", "cookies")
+		tw.keyring.Set("twitter", "auth", "true")
 	}
 
 	fmt.Println("Twitter auth saved.")
 	return nil
-}
-
-func (tw *Twitter) restoreCookies(ctx context.Context) error {
-	if tw.keyring == nil {
-		return fmt.Errorf("no keyring")
-	}
-	cookieJSON, err := tw.keyring.Get("twitter", "cookies")
-	if err != nil {
-		return fmt.Errorf("no saved cookies — run: megahorn auth twitter")
-	}
-
-	var cookies []*network.Cookie
-	if err := json.Unmarshal([]byte(cookieJSON), &cookies); err != nil {
-		return fmt.Errorf("corrupt cookies — re-run: megahorn auth twitter")
-	}
-
-	return chromedp.Run(ctx,
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			for _, c := range cookies {
-				err := network.SetCookie(c.Name, c.Value).
-					WithDomain(c.Domain).
-					WithPath(c.Path).
-					WithHTTPOnly(c.HTTPOnly).
-					WithSecure(c.Secure).
-					Do(ctx)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		}),
-	)
 }
 
 func (tw *Twitter) Post(content string, opts PostOpts) (*PostResult, error) {
@@ -142,18 +101,24 @@ func (tw *Twitter) Post(content string, opts PostOpts) (*PostResult, error) {
 		}, nil
 	}
 
+	if tw.Status() != AuthStatusAuthenticated {
+		return nil, fmt.Errorf("not authenticated — run: megahorn auth twitter")
+	}
+
 	headed := opts.Headed
-	ctx, cancel := browser.NewContext(context.Background(), tw.chromeOpts(&headed))
+	ctx, cancel, err := browser.NewContext(context.Background(), tw.chromeOpts(&headed))
+	if err != nil {
+		if strings.Contains(err.Error(), "lock") || strings.Contains(err.Error(), "already") {
+			return nil, fmt.Errorf("another megahorn instance is running — close it and retry")
+		}
+		return nil, fmt.Errorf("failed to create browser context: %w", err)
+	}
 	defer cancel()
 
 	ctx, timeoutCancel := context.WithTimeout(ctx, 90*time.Second)
 	defer timeoutCancel()
 
-	if err := tw.restoreCookies(ctx); err != nil {
-		return nil, err
-	}
-
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.Navigate("https://x.com/compose/tweet"),
 		chromedp.WaitVisible(tw.selectors.TweetTextarea, chromedp.ByQuery),
 	)

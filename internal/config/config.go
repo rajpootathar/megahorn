@@ -18,6 +18,7 @@ type Config struct {
 type BrowserConfig struct {
 	Headed     bool   `mapstructure:"headed"`
 	ChromePath string `mapstructure:"chrome_path"`
+	ProfileDir string `mapstructure:"profile_dir"`
 }
 
 type PlatformsConfig struct {
@@ -37,12 +38,17 @@ func DefaultPath() string {
 	return filepath.Join(Dir(), "config.yaml")
 }
 
+func DefaultProfileDir() string {
+	return filepath.Join(Dir(), "chrome-profile")
+}
+
 func Load(path string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigType("yaml")
 
 	v.SetDefault("browser.headed", false)
 	v.SetDefault("browser.chrome_path", "")
+	v.SetDefault("browser.profile_dir", filepath.Join(Dir(), "chrome-profile"))
 	v.SetDefault("platforms.defaults", []string{})
 	v.SetDefault("reddit.default_subreddits", []string{})
 
